@@ -127,4 +127,7 @@ git push
 You are logged in as the wrong GitHub user.  
 Ask the repo owner to add you as a collaborator and clear old credentials in Windows Credential Manager.
 
+## testing ignore 
+ssh key valid  
+
 ---
