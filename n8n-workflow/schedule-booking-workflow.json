@@ -1,0 +1,455 @@
+{
+  "name": "UniBluePrint - Schedule Booking Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "schedule-booking",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-001",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 400],
+      "webhookId": "unibluprint-schedule-booking"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Node 2: Data Transformation\n// Parse and structure incoming form data from webhook\n\nconst body = $input.first().json.body || $input.first().json;\n\n// Helper: safely get value with fallback\nconst get = (obj, path, fallback = null) => {\n  return path.split('.').reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : fallback), obj);\n};\n\n// Helper: parse time string to HH:MM\nconst parseTime = (t) => {\n  if (!t) return null;\n  if (typeof t === 'string' && /^\\d{2}:\\d{2}$/.test(t)) return t;\n  const d = new Date(t);\n  if (!isNaN(d)) return d.toTimeString().slice(0, 5);\n  return t;\n};\n\n// Build lectures array\nconst lectures = [];\nconst days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];\ndays.forEach(day => {\n  const dayKey = day.toLowerCase();\n  const dayLectures = get(body, `schedule.${dayKey}`, []);\n  if (Array.isArray(dayLectures)) {\n    dayLectures.forEach(lec => {\n      if (lec && lec.name) {\n        lectures.push({\n          day,\n          name: lec.name,\n          start: parseTime(lec.start),\n          end: parseTime(lec.end),\n          location: lec.location || '',\n          mandatory: lec.mandatory !== false\n        });\n      }\n    });\n  }\n});\n\n// Build hobbies array\nconst hobbies = (get(body, 'hobbies', []) || []).slice(0, 10).map(h => ({\n  name: h.name || '',\n  days: Array.isArray(h.days) ? h.days : [],\n  timeOfDay: h.timeOfDay || 'afternoon',\n  duration: parseInt(h.duration) || 60,\n  frequency: parseInt(h.frequency) || 1,\n  flexible: h.flexible !== false\n}));\n\n// Build sports array\nconst sports = (get(body, 'sports', []) || []).map(s => ({\n  type: s.type || '',\n  days: Array.isArray(s.days) ? s.days : [],\n  startTime: parseTime(s.startTime),\n  duration: parseInt(s.duration) || 60,\n  location: s.location || '',\n  teamCommitment: s.teamCommitment === true || s.teamCommitment === 'true'\n}));\n\n// Build social events\nconst socialEvents = (get(body, 'socialEvents', []) || []).map(e => ({\n  eventType: e.eventType || 'Other',\n  name: e.name || '',\n  days: Array.isArray(e.days) ? e.days : [],\n  timeCommitment: parseFloat(e.timeCommitment) || 1,\n  recurring: e.recurring === true || e.recurring === 'true'\n}));\n\n// Build college events\nconst collegeEvents = (get(body, 'collegeEvents', []) || []).map(e => ({\n  name: e.name || '',\n  eventType: e.eventType || 'Other',\n  frequency: e.frequency || 'One-time',\n  date: e.date || null,\n  dayOfWeek: e.dayOfWeek || null,\n  duration: parseFloat(e.duration) || 1\n}));\n\n// Build deadlines\nconst deadlines = (get(body, 'deadlines', []) || []).map(d => ({\n  name: d.name || '',\n  dueDate: d.dueDate || null,\n  prepTime: parseFloat(d.prepTime) || 2,\n  priority: d.priority || 'Medium'\n}));\n\n// Build commute\nconst commute = {\n  location: get(body, 'commute.location', ''),\n  mode: get(body, 'commute.mode', 'Bus'),\n  toCampus: parseInt(get(body, 'commute.toCampus', 30)),\n  fromCampus: parseInt(get(body, 'commute.fromCampus', 30)),\n  days: get(body, 'commute.days', ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'])\n};\n\n// Structured output\nconst structured = {\n  student: {\n    name: get(body, 'student.name', get(body, 'name', '')),\n    email: get(body, 'student.email', get(body, 'email', '')),\n    university: get(body, 'student.university', get(body, 'university', '')),\n    course: get(body, 'student.course', get(body, 'course', '')),\n    year: get(body, 'student.year', get(body, 'year', ''))\n  },\n  schedule: {\n    lectures,\n    hobbies,\n    sports,\n    socialEvents,\n    collegeEvents,\n    commute,\n    deadlines\n  },\n  routines: {\n    wakeTime: parseTime(get(body, 'routines.wakeTime', '07:00')),\n    bedTime: parseTime(get(body, 'routines.bedTime', '23:00')),\n    morningDuration: parseInt(get(body, 'routines.morningDuration', 60)),\n    eveningDuration: parseInt(get(body, 'routines.eveningDuration', 45)),\n    personalCare: parseInt(get(body, 'routines.personalCare', 30)),\n    mealPrep: parseInt(get(body, 'routines.mealPrep', 60)),\n    morningActivities: get(body, 'routines.morningActivities', []),\n    eveningActivities: get(body, 'routines.eveningActivities', [])\n  },\n  work: {\n    isWorking: get(body, 'work.isWorking', false),\n    hoursPerWeek: parseInt(get(body, 'work.hoursPerWeek', 0)),\n    shiftDays: get(body, 'work.shiftDays', []),\n    shiftTimes: get(body, 'work.shiftTimes', ''),\n    isJobHunting: get(body, 'work.isJobHunting', false),\n    jobHuntingHours: parseInt(get(body, 'work.jobHuntingHours', 0)),\n    preferredJobHuntTime: get(body, 'work.preferredJobHuntTime', ''),\n    interviews: get(body, 'work.interviews', [])\n  },\n  goals: {\n    mainGoals: get(body, 'goals.mainGoals', ''),\n    strengths: get(body, 'goals.strengths', ''),\n    weaknesses: get(body, 'goals.weaknesses', ''),\n    improvements: get(body, 'goals.improvements', ''),\n    scheduleObjectives: get(body, 'goals.scheduleObjectives', []),\n    additionalContext: get(body, 'goals.additionalContext', '')\n  },\n  preferences: {\n    studyHoursWeekly: parseInt(get(body, 'preferences.studyHoursWeekly', 15)),\n    idealStudyHours: parseInt(get(body, 'preferences.idealStudyHours', 20)),\n    studyStyle: get(body, 'preferences.studyStyle', 'long_blocks'),\n    studyLocation: get(body, 'preferences.studyLocation', 'library'),\n    bestStudyTime: get(body, 'preferences.bestStudyTime', ['morning']),\n    breakDuration: parseInt(get(body, 'preferences.breakDuration', 30)),\n    downtimeDaily: parseFloat(get(body, 'preferences.downtimeDaily', 2)),\n    maxHoursPerDay: parseInt(get(body, 'preferences.maxHoursPerDay', 14)),\n    freeDays: get(body, 'preferences.freeDays', ['Sunday']),\n    energyLevels: get(body, 'preferences.energyLevels', 'morning'),\n    afternoonNap: get(body, 'preferences.afternoonNap', false)\n  }\n};\n\n// Validation: check required fields\nconst missing = [];\nif (!structured.student.name) missing.push('name');\nif (!structured.student.email) missing.push('email');\nif (!structured.routines.wakeTime) missing.push('wakeTime');\nif (!structured.routines.bedTime) missing.push('bedTime');\n\nif (missing.length > 0) {\n  throw new Error(`VALIDATION_FAILED: Missing required fields: ${missing.join(', ')}`);\n}\n\nreturn [{ json: structured }];\n"
+      },
+      "id": "node-002",
+      "name": "Transform Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 400]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "tableId": "users",
+        "filterType": "string",
+        "filterString": "email=eq.{{$json.student.email}}"
+      },
+      "id": "node-003",
+      "name": "Check User Exists",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [680, 400],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$json.length}}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "node-004",
+      "name": "User Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "users",
+        "filterType": "string",
+        "filterString": "email=eq.={{$node[\"Transform Data\"].json.student.email}}",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "name", "fieldValue": "={{$node[\"Transform Data\"].json.student.name}}" },
+            { "fieldId": "university", "fieldValue": "={{$node[\"Transform Data\"].json.student.university}}" },
+            { "fieldId": "course", "fieldValue": "={{$node[\"Transform Data\"].json.student.course}}" },
+            { "fieldId": "year_of_study", "fieldValue": "={{$node[\"Transform Data\"].json.student.year}}" },
+            { "fieldId": "updated_at", "fieldValue": "={{new Date().toISOString()}}" }
+          ]
+        }
+      },
+      "id": "node-005",
+      "name": "Update User",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1120, 280],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "tableId": "users",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "name", "fieldValue": "={{$node[\"Transform Data\"].json.student.name}}" },
+            { "fieldId": "email", "fieldValue": "={{$node[\"Transform Data\"].json.student.email}}" },
+            { "fieldId": "university", "fieldValue": "={{$node[\"Transform Data\"].json.student.university}}" },
+            { "fieldId": "course", "fieldValue": "={{$node[\"Transform Data\"].json.student.course}}" },
+            { "fieldId": "year_of_study", "fieldValue": "={{$node[\"Transform Data\"].json.student.year}}" },
+            { "fieldId": "created_at", "fieldValue": "={{new Date().toISOString()}}" }
+          ]
+        }
+      },
+      "id": "node-006",
+      "name": "Create User",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1120, 520],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "tableId": "schedules",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "user_id", "fieldValue": "={{$json.id}}" },
+            { "fieldId": "schedule_data", "fieldValue": "={{JSON.stringify($node[\"Transform Data\"].json.schedule)}}" },
+            { "fieldId": "routines", "fieldValue": "={{JSON.stringify($node[\"Transform Data\"].json.routines)}}" },
+            { "fieldId": "work_info", "fieldValue": "={{JSON.stringify($node[\"Transform Data\"].json.work)}}" },
+            { "fieldId": "goals", "fieldValue": "={{JSON.stringify($node[\"Transform Data\"].json.goals)}}" },
+            { "fieldId": "preferences", "fieldValue": "={{JSON.stringify($node[\"Transform Data\"].json.preferences)}}" },
+            { "fieldId": "status", "fieldValue": "processing" },
+            { "fieldId": "created_at", "fieldValue": "={{new Date().toISOString()}}" }
+          ]
+        }
+      },
+      "id": "node-007",
+      "name": "Insert Schedule Data",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1340, 400],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Node 8: Build Claude API Prompt\nconst data = $node['Transform Data'].json;\nconst { student, schedule, routines, work, goals, preferences } = data;\n\n// Format lectures section\nconst formatLectures = (lectures) => {\n  if (!lectures || lectures.length === 0) return 'No lectures provided.';\n  return lectures.map(l =>\n    `- ${l.day}: ${l.name} (${l.start}-${l.end})${l.location ? ` at ${l.location}` : ''} [Mandatory: ${l.mandatory}]`\n  ).join('\\n');\n};\n\n// Format hobbies section\nconst formatHobbies = (hobbies) => {\n  if (!hobbies || hobbies.length === 0) return 'No hobbies listed.';\n  return hobbies.map(h =>\n    `- ${h.name}: ${h.frequency}x per week on ${h.days.join(', ')}, ${h.duration} min/session [Flexible: ${h.flexible}]`\n  ).join('\\n');\n};\n\n// Format sports section\nconst formatSports = (sports) => {\n  if (!sports || sports.length === 0) return 'No sports listed.';\n  return sports.map(s =>\n    `- ${s.type} on ${s.days.join(', ')} at ${s.startTime} for ${s.duration} min [Team: ${s.teamCommitment}]`\n  ).join('\\n');\n};\n\n// Format social events\nconst formatSocialEvents = (events) => {\n  if (!events || events.length === 0) return 'No social events.';\n  return events.map(e =>\n    `- ${e.eventType}: ${e.name} (${e.timeCommitment} hrs/week) [Recurring: ${e.recurring}]`\n  ).join('\\n');\n};\n\n// Format college events\nconst formatCollegeEvents = (events) => {\n  if (!events || events.length === 0) return 'No college events.';\n  return events.map(e =>\n    `- ${e.name} (${e.eventType}): ${e.frequency}, ${e.duration} hrs`\n  ).join('\\n');\n};\n\n// Format deadlines\nconst formatDeadlines = (deadlines) => {\n  if (!deadlines || deadlines.length === 0) return 'No upcoming deadlines.';\n  return deadlines.map(d =>\n    `- ${d.name}: Due ${d.dueDate}, needs ${d.prepTime} hrs [Priority: ${d.priority}]`\n  ).join('\\n');\n};\n\n// Format work section\nconst formatWork = (work) => {\n  if (!work || !work.isWorking) return 'Not currently working part-time.';\n  let txt = `Part-time work: ${work.hoursPerWeek} hrs/week on ${work.shiftDays.join(', ')} (${work.shiftTimes})`;\n  if (work.isJobHunting) {\n    txt += `\\nJob hunting: ${work.jobHuntingHours} hrs/week (preferred: ${work.preferredJobHuntTime})`;\n  }\n  if (work.interviews && work.interviews.length > 0) {\n    txt += `\\nScheduled interviews: ${work.interviews.map(i => `${i.date} at ${i.time}`).join(', ')}`;\n  }\n  return txt;\n};\n\nconst prompt = `You are an expert schedule optimization consultant for Irish university students. A student has provided comprehensive information about their commitments, goals, and preferences. Your task is to create a personalized, optimized weekly schedule.\n\n# STUDENT PROFILE\n\n**Name:** ${student.name}\n**University:** ${student.university}\n**Course:** ${student.course}\n**Year:** ${student.year}\n\n# TIME CONSTRAINTS\n\n**Wake Time:** ${routines.wakeTime}\n**Bed Time:** ${routines.bedTime}\n**Morning Routine Duration:** ${routines.morningDuration} minutes\n**Evening Routine Duration:** ${routines.eveningDuration} minutes\n**Daily Personal Care:** ${routines.personalCare} minutes\n**Meal Preparation:** ${routines.mealPrep} minutes per day\n\n# FIXED COMMITMENTS\n\n## Lectures/Classes\n${formatLectures(schedule.lectures)}\n\n## Commute\n- **Home Location:** ${schedule.commute.location || 'Not specified'}\n- **Transport:** ${schedule.commute.mode}\n- **To Campus:** ${schedule.commute.toCampus} minutes\n- **From Campus:** ${schedule.commute.fromCampus} minutes\n- **Days:** ${Array.isArray(schedule.commute.days) ? schedule.commute.days.join(', ') : schedule.commute.days}\n\n## Sports & Fitness\n${formatSports(schedule.sports)}\n\n## Hobbies & Activities\n${formatHobbies(schedule.hobbies)}\n\n## Social & College Events\n${formatSocialEvents(schedule.socialEvents)}\n${formatCollegeEvents(schedule.collegeEvents)}\n\n## Work & Employment\n${formatWork(work)}\n\n# STUDY REQUIREMENTS\n\n- **Current Study Hours/Week:** ${preferences.studyHoursWeekly}\n- **Target Study Hours/Week:** ${preferences.idealStudyHours}\n- **Study Style Preference:** ${preferences.studyStyle}\n- **Best Study Times:** ${Array.isArray(preferences.bestStudyTime) ? preferences.bestStudyTime.join(', ') : preferences.bestStudyTime}\n- **Study Location:** ${preferences.studyLocation}\n\n## Upcoming Deadlines\n${formatDeadlines(schedule.deadlines)}\n\n# STUDENT GOALS & SELF-ASSESSMENT\n\n**Main Goals This Semester:** ${goals.mainGoals}\n\n**Natural Strengths:** ${goals.strengths}\n\n**Areas of Struggle:** ${goals.weaknesses}\n\n**Skills/Habits to Improve:** ${goals.improvements}\n\n**What Student Wants from Schedule:**\n${Array.isArray(goals.scheduleObjectives) ? goals.scheduleObjectives.map(o => `- ${o}`).join('\\n') : goals.scheduleObjectives}\n\n**Additional Context:** ${goals.additionalContext}\n\n# PREFERENCES & CONSTRAINTS\n\n- **Break Duration Between Classes:** ${preferences.breakDuration} minutes\n- **Daily Downtime Needed:** ${preferences.downtimeDaily} hours\n- **Maximum Scheduled Hours/Day:** ${preferences.maxHoursPerDay}\n- **Days to Keep Free:** ${Array.isArray(preferences.freeDays) ? preferences.freeDays.join(', ') : preferences.freeDays}\n- **Energy Peaks:** ${preferences.energyLevels}\n- **Needs Afternoon Nap/Break:** ${preferences.afternoonNap}\n\n# YOUR TASK\n\nCreate an optimized weekly schedule that:\n\n1. **Respects all fixed commitments** (lectures, sports, commute times)\n2. **Incorporates study blocks** matching their study style and preferred times\n3. **Includes buffer time** for meals, personal care, and transitions\n4. **Accounts for their strengths and weaknesses**\n5. **Aligns with their goals**\n6. **Provides realistic downtime** to prevent burnout\n7. **Optimizes for their energy levels**\n8. **Builds in deadline preparation** for upcoming assignments/exams\n\n# OUTPUT FORMAT\n\nReturn ONLY valid JSON with this exact structure:\n\n{\n  \"weeklySchedule\": {\n    \"Monday\": [\n      {\n        \"time\": \"07:00-07:30\",\n        \"activity\": \"Morning Routine\",\n        \"type\": \"personal|academic|social|fitness|work|downtime\",\n        \"location\": \"Home\",\n        \"flexible\": false,\n        \"notes\": \"Optional brief note\"\n      }\n    ],\n    \"Tuesday\": [],\n    \"Wednesday\": [],\n    \"Thursday\": [],\n    \"Friday\": [],\n    \"Saturday\": [],\n    \"Sunday\": []\n  },\n  \"recommendations\": {\n    \"summary\": \"2-3 sentence overview of the optimized schedule\",\n    \"keyInsights\": [\"insight1\", \"insight2\", \"insight3\"],\n    \"studyStrategy\": \"Explanation of how study blocks are distributed and why\",\n    \"improvements\": [\"habit1\", \"tip2\", \"suggestion3\"],\n    \"warnings\": [\"warning1\", \"concern2\"]\n  },\n  \"metrics\": {\n    \"totalScheduledHours\": 65,\n    \"academicHours\": 25,\n    \"studyHours\": 20,\n    \"fitnessHours\": 5,\n    \"socialHours\": 8,\n    \"freeTime\": 15,\n    \"sleepHours\": 56,\n    \"busiestDay\": \"Wednesday\",\n    \"lightestDay\": \"Sunday\"\n  }\n}\n\n# IMPORTANT RULES\n\n- Schedule MUST start at wake time and end at bed time\n- Include ALL mandatory commitments (lectures, team sports)\n- Leave realistic buffer time between activities (minimum 15 minutes for transitions)\n- Schedule meals at reasonable times (breakfast after waking, lunch 12-2pm, dinner 6-8pm)\n- Don't over-schedule: respect their \"maximum hours per day\" limit\n- Account for commute time before/after campus activities\n- Respect their natural energy levels\n\nNow generate the optimized schedule.`;\n\nreturn [{ json: { prompt } }];\n"
+      },
+      "id": "node-008",
+      "name": "Build Claude Prompt",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1560, 400]
+    },
+    {
+      "parameters": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{$env.CLAUDE_API_KEY}}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "jsonBody": "={\"model\":\"claude-sonnet-4-20250514\",\"max_tokens\":4096,\"messages\":[{\"role\":\"user\",\"content\":\"{{$node[\\\"Build Claude Prompt\\\"].json.prompt}}\"}]}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "node-009",
+      "name": "Claude API Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1780, 400],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "functionCode": "// Node 10: Parse Claude Response\nconst response = $input.first().json;\n\n// Extract text content from Claude API response\nlet rawText = '';\nif (response.content && Array.isArray(response.content)) {\n  rawText = response.content.find(c => c.type === 'text')?.text || '';\n} else if (response.choices) {\n  // Fallback for OpenAI-style responses\n  rawText = response.choices[0]?.message?.content || '';\n}\n\nif (!rawText) {\n  throw new Error('PARSE_ERROR: No text content in Claude response');\n}\n\n// Extract JSON from response (Claude may include markdown code blocks)\nlet jsonStr = rawText.trim();\n\n// Remove markdown code fences if present\nconst jsonMatch = jsonStr.match(/```(?:json)?\\s*([\\s\\S]*?)\\s*```/);\nif (jsonMatch) {\n  jsonStr = jsonMatch[1].trim();\n}\n\n// Try to find JSON object if there's surrounding text\nif (!jsonStr.startsWith('{')) {\n  const objStart = jsonStr.indexOf('{');\n  const objEnd = jsonStr.lastIndexOf('}');\n  if (objStart !== -1 && objEnd !== -1) {\n    jsonStr = jsonStr.slice(objStart, objEnd + 1);\n  }\n}\n\nlet parsed;\ntry {\n  parsed = JSON.parse(jsonStr);\n} catch (e) {\n  throw new Error(`PARSE_ERROR: Failed to parse JSON from Claude: ${e.message}`);\n}\n\n// Validate required structure\nif (!parsed.weeklySchedule) {\n  throw new Error('PARSE_ERROR: Missing weeklySchedule in Claude response');\n}\nif (!parsed.recommendations) {\n  throw new Error('PARSE_ERROR: Missing recommendations in Claude response');\n}\nif (!parsed.metrics) {\n  throw new Error('PARSE_ERROR: Missing metrics in Claude response');\n}\n\n// Merge with student data\nconst studentData = $node['Transform Data'].json;\n\nreturn [{\n  json: {\n    student: studentData.student,\n    schedule_id: $node['Insert Schedule Data'].json.id,\n    weeklySchedule: parsed.weeklySchedule,\n    recommendations: parsed.recommendations,\n    metrics: parsed.metrics,\n    rawPromptTokens: response.usage?.input_tokens || 0,\n    rawCompletionTokens: response.usage?.output_tokens || 0\n  }\n}];\n"
+      },
+      "id": "node-010",
+      "name": "Parse Claude Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2000, 400]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "schedules",
+        "filterType": "string",
+        "filterString": "id=eq.={{$json.schedule_id}}",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "generated_schedule", "fieldValue": "={{JSON.stringify($json.weeklySchedule)}}" },
+            { "fieldId": "recommendations", "fieldValue": "={{JSON.stringify($json.recommendations)}}" },
+            { "fieldId": "metrics", "fieldValue": "={{JSON.stringify($json.metrics)}}" },
+            { "fieldId": "status", "fieldValue": "generated" },
+            { "fieldId": "updated_at", "fieldValue": "={{new Date().toISOString()}}" }
+          ]
+        }
+      },
+      "id": "node-010b",
+      "name": "Save Generated Schedule",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [2220, 400],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Node 12: Format Email HTML\nconst data = $input.first().json;\nconst { student, weeklySchedule, recommendations, metrics } = data;\n\nconst days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];\n\n// Color map for activity types\nconst typeColors = {\n  academic: '#4A90D9',\n  personal: '#7ED321',\n  fitness: '#F5A623',\n  social: '#9B59B6',\n  work: '#E74C3C',\n  downtime: '#95A5A6',\n  default: '#BDC3C7'\n};\n\n// Build schedule table HTML\nconst buildScheduleTable = () => {\n  let html = `\n  <table style=\"width:100%;border-collapse:collapse;margin:20px 0;font-family:Arial,sans-serif;font-size:13px;\">\n    <thead>\n      <tr style=\"background:#2C3E50;color:white;\">\n        <th style=\"padding:10px;text-align:left;width:80px;\">Time</th>\n        ${days.map(d => `<th style=\"padding:10px;text-align:center;\">${d.slice(0,3)}</th>`).join('')}\n      </tr>\n    </thead>\n    <tbody>\n  `;\n\n  // Collect all unique time slots across all days\n  const allTimes = new Set();\n  days.forEach(day => {\n    (weeklySchedule[day] || []).forEach(slot => {\n      allTimes.add(slot.time.split('-')[0]);\n    });\n  });\n\n  const sortedTimes = Array.from(allTimes).sort();\n\n  // Build a lookup map for quick access\n  const slotMap = {};\n  days.forEach(day => {\n    slotMap[day] = {};\n    (weeklySchedule[day] || []).forEach(slot => {\n      const startTime = slot.time.split('-')[0];\n      slotMap[day][startTime] = slot;\n    });\n  });\n\n  sortedTimes.forEach((time, i) => {\n    const bgColor = i % 2 === 0 ? '#f9f9f9' : '#ffffff';\n    html += `<tr style=\"background:${bgColor};\">`;\n    html += `<td style=\"padding:8px;font-weight:bold;color:#555;white-space:nowrap;\">${time}</td>`;\n    days.forEach(day => {\n      const slot = slotMap[day][time];\n      if (slot) {\n        const color = typeColors[slot.type] || typeColors.default;\n        html += `<td style=\"padding:6px;text-align:center;\">\n          <div style=\"background:${color};color:white;border-radius:4px;padding:4px 6px;font-size:11px;\">\n            ${slot.activity}${slot.location ? '<br><small style=\"opacity:0.85\">📍 '+slot.location+'</small>' : ''}\n          </div>\n        </td>`;\n      } else {\n        html += '<td></td>';\n      }\n    });\n    html += '</tr>';\n  });\n\n  html += '</tbody></table>';\n  return html;\n};\n\n// Build metrics cards\nconst buildMetrics = () => {\n  const cards = [\n    { label: 'Academic Hours', value: metrics.academicHours + 'h', color: '#4A90D9' },\n    { label: 'Study Hours', value: metrics.studyHours + 'h', color: '#27AE60' },\n    { label: 'Free Time', value: metrics.freeTime + 'h', color: '#F39C12' },\n    { label: 'Sleep Hours', value: metrics.sleepHours + 'h', color: '#8E44AD' },\n    { label: 'Fitness Hours', value: metrics.fitnessHours + 'h', color: '#E74C3C' },\n    { label: 'Busiest Day', value: metrics.busiestDay, color: '#2C3E50' }\n  ];\n\n  return `<div style=\"display:flex;flex-wrap:wrap;gap:12px;margin:20px 0;\">\n    ${cards.map(c => `\n      <div style=\"background:${c.color};color:white;border-radius:8px;padding:12px 16px;min-width:120px;text-align:center;\">\n        <div style=\"font-size:24px;font-weight:bold;\">${c.value}</div>\n        <div style=\"font-size:12px;opacity:0.9;margin-top:4px;\">${c.label}</div>\n      </div>`).join('')}\n  </div>`;\n};\n\n// Build recommendations section\nconst buildRecommendations = () => {\n  const { summary, keyInsights, studyStrategy, improvements, warnings } = recommendations;\n  return `\n  <div style=\"background:#EBF5FB;border-left:4px solid #4A90D9;padding:16px;margin:16px 0;border-radius:0 8px 8px 0;\">\n    <h3 style=\"margin:0 0 8px;color:#2C3E50;\">Schedule Overview</h3>\n    <p style=\"margin:0;color:#555;\">${summary}</p>\n  </div>\n\n  <h3 style=\"color:#2C3E50;\">Key Insights</h3>\n  <ul style=\"color:#555;line-height:1.8;\">\n    ${(keyInsights || []).map(i => `<li>${i}</li>`).join('')}\n  </ul>\n\n  <h3 style=\"color:#2C3E50;\">Study Strategy</h3>\n  <p style=\"color:#555;\">${studyStrategy}</p>\n\n  <h3 style=\"color:#2C3E50;\">Recommendations</h3>\n  <ul style=\"color:#555;line-height:1.8;\">\n    ${(improvements || []).map(i => `<li>✅ ${i}</li>`).join('')}\n  </ul>\n\n  ${warnings && warnings.length > 0 ? `\n  <h3 style=\"color:#E74C3C;\">⚠️ Heads Up</h3>\n  <ul style=\"color:#E74C3C;line-height:1.8;\">\n    ${warnings.map(w => `<li>${w}</li>`).join('')}\n  </ul>` : ''}\n  `;\n};\n\nconst html = `\n<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>Your Personalized Schedule — UniBluePrint</title>\n</head>\n<body style=\"font-family:Arial,sans-serif;background:#f4f6f8;margin:0;padding:0;\">\n  <div style=\"max-width:800px;margin:0 auto;background:white;\">\n    <!-- Header -->\n    <div style=\"background:linear-gradient(135deg,#1a237e,#283593);color:white;padding:40px 32px;\">\n      <h1 style=\"margin:0;font-size:28px;\">Your Personalized Weekly Schedule</h1>\n      <p style=\"margin:8px 0 0;opacity:0.85;font-size:16px;\">Prepared exclusively for ${student.name}</p>\n      <p style=\"margin:4px 0 0;opacity:0.7;font-size:14px;\">${student.university} · ${student.course} · Year ${student.year}</p>\n    </div>\n\n    <!-- Body -->\n    <div style=\"padding:32px;\">\n      <p style=\"color:#555;font-size:15px;\">Hi ${student.name.split(' ')[0]},</p>\n      <p style=\"color:#555;font-size:15px;\">Your optimized weekly schedule is ready! We've analyzed your commitments, goals, and preferences to create a schedule that works best for you.</p>\n\n      <h2 style=\"color:#1a237e;\">📊 Your Week at a Glance</h2>\n      ${buildMetrics()}\n\n      <h2 style=\"color:#1a237e;\">📅 Weekly Schedule</h2>\n      <p style=\"color:#777;font-size:13px;\">Scroll right on mobile to see the full schedule.</p>\n      <div style=\"overflow-x:auto;\">\n        ${buildScheduleTable()}\n      </div>\n\n      <!-- Legend -->\n      <div style=\"margin:16px 0;display:flex;flex-wrap:wrap;gap:10px;\">\n        ${Object.entries(typeColors).filter(([k]) => k !== 'default').map(([type, color]) =>\n          `<span style=\"background:${color};color:white;padding:4px 10px;border-radius:12px;font-size:12px;text-transform:capitalize;\">${type}</span>`\n        ).join('')}\n      </div>\n\n      <h2 style=\"color:#1a237e;\">💡 Your Personalized Recommendations</h2>\n      ${buildRecommendations()}\n\n      <!-- Next Steps -->\n      <div style=\"background:#F0FFF4;border:1px solid #A8D5B5;border-radius:8px;padding:20px;margin:24px 0;\">\n        <h3 style=\"margin:0 0 12px;color:#2D6A4F;\">🚀 Next Steps</h3>\n        <ol style=\"color:#555;line-height:2;margin:0;padding-left:20px;\">\n          <li>Save this schedule to your calendar (sync coming soon!)</li>\n          <li>Set reminders for your study blocks</li>\n          <li>Review your schedule weekly and adjust as needed</li>\n          <li>Reach out to us if you need a schedule revision</li>\n        </ol>\n      </div>\n\n      <p style=\"color:#555;\">Best of luck this semester! 🍀</p>\n      <p style=\"color:#555;\"><strong>The UniBluePrint Team</strong></p>\n    </div>\n\n    <!-- Footer -->\n    <div style=\"background:#2C3E50;color:#BDC3C7;padding:24px 32px;font-size:12px;\">\n      <p style=\"margin:0;\">© ${new Date().getFullYear()} UniBluePrint. All rights reserved.</p>\n      <p style=\"margin:8px 0 0;\">This schedule was generated using AI. Review and adjust based on your specific needs.</p>\n    </div>\n  </div>\n</body>\n</html>`;\n\nreturn [{ json: { html, student, subject: `Your Personalized Schedule is Ready, ${student.name.split(' ')[0]}! 🎓` } }];\n"
+      },
+      "id": "node-012",
+      "name": "Format Email",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2440, 400]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$env.FROM_EMAIL}}",
+        "toEmail": "={{$json.student.email}}",
+        "subject": "={{$json.subject}}",
+        "emailType": "html",
+        "html": "={{$json.html}}",
+        "options": {}
+      },
+      "id": "node-013",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [2660, 400],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-creds",
+          "name": "SMTP Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "services_purchased",
+        "filterType": "string",
+        "filterString": "user_id=eq.={{$node[\"Insert Schedule Data\"].json.user_id}}&service_type=eq.Schedule",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "status", "fieldValue": "delivered" },
+            { "fieldId": "delivered_at", "fieldValue": "={{new Date().toISOString()}}" }
+          ]
+        }
+      },
+      "id": "node-014",
+      "name": "Update Service Status",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [2880, 400],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{$env.SLACK_WEBHOOK_URL}}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "jsonBody": "={\"text\":\"✅ Schedule delivered to *{{$node[\\\"Parse Claude Response\\\"].json.student.name}}* ({{$node[\\\"Parse Claude Response\\\"].json.student.email}}) | Study: {{$node[\\\"Parse Claude Response\\\"].json.metrics.studyHours}}h | Free: {{$node[\\\"Parse Claude Response\\\"].json.metrics.freeTime}}h\",\"channel\":\"#schedule-deliveries\"}"
+      },
+      "id": "node-015",
+      "name": "Slack Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [3100, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\":true,\"message\":\"Schedule generation started. You will receive an email shortly.\",\"email\":\"{{$node[\\\"Transform Data\\\"].json.student.email}}\"}"
+      },
+      "id": "node-016",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [460, 600]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Error Handler: Validation Failed\nconst errorMessage = $input.first().json.error?.message || 'Unknown validation error';\nconst isValidationError = errorMessage.includes('VALIDATION_FAILED');\n\nif (!isValidationError) {\n  // Re-throw non-validation errors\n  throw new Error(errorMessage);\n}\n\n// Extract student email if available\nconst body = $node['Webhook Trigger']?.json?.body || {};\nconst email = body.email || body['student.email'] || '';\nconst name = body.name || body['student.name'] || 'Student';\n\nreturn [{ json: { email, name, errorMessage, type: 'validation' } }];\n"
+      },
+      "id": "node-error-validation",
+      "name": "Handle Validation Error",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [680, 600]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "tableId": "workflow_logs",
+        "dataToSend": "defineBelow",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "event_type", "fieldValue": "error" },
+            { "fieldId": "error_type", "fieldValue": "={{$json.type}}" },
+            { "fieldId": "error_message", "fieldValue": "={{$json.errorMessage}}" },
+            { "fieldId": "student_email", "fieldValue": "={{$json.email}}" },
+            { "fieldId": "created_at", "fieldValue": "={{new Date().toISOString()}}" }
+          ]
+        }
+      },
+      "id": "node-error-log",
+      "name": "Log Error to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [900, 600],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          { "node": "Transform Data", "type": "main", "index": 0 },
+          { "node": "Respond to Webhook", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Transform Data": {
+      "main": [
+        [{ "node": "Check User Exists", "type": "main", "index": 0 }]
+      ],
+      "error": [
+        [{ "node": "Handle Validation Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check User Exists": {
+      "main": [
+        [{ "node": "User Exists?", "type": "main", "index": 0 }]
+      ]
+    },
+    "User Exists?": {
+      "main": [
+        [{ "node": "Update User", "type": "main", "index": 0 }],
+        [{ "node": "Create User", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update User": {
+      "main": [
+        [{ "node": "Insert Schedule Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create User": {
+      "main": [
+        [{ "node": "Insert Schedule Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Insert Schedule Data": {
+      "main": [
+        [{ "node": "Build Claude Prompt", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Claude Prompt": {
+      "main": [
+        [{ "node": "Claude API Call", "type": "main", "index": 0 }]
+      ]
+    },
+    "Claude API Call": {
+      "main": [
+        [{ "node": "Parse Claude Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Claude Response": {
+      "main": [
+        [{ "node": "Save Generated Schedule", "type": "main", "index": 0 }]
+      ]
+    },
+    "Save Generated Schedule": {
+      "main": [
+        [{ "node": "Format Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Email": {
+      "main": [
+        [{ "node": "Send Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [{ "node": "Update Service Status", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update Service Status": {
+      "main": [
+        [{ "node": "Slack Notification", "type": "main", "index": 0 }]
+      ]
+    },
+    "Handle Validation Error": {
+      "main": [
+        [{ "node": "Log Error to Supabase", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "unibluprint-error-handler",
+    "timezone": "Europe/Dublin"
+  },
+  "staticData": null,
+  "tags": [
+    { "name": "UniBluePrint" },
+    { "name": "Schedule" },
+    { "name": "Production" }
+  ],
+  "pinData": {},
+  "versionId": "1.0.0",
+  "meta": {
+    "instanceId": "unibluprint-n8n"
+  }
+}
